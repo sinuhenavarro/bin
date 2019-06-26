@@ -1,0 +1,138 @@
+#!/bin/bash
+
+##########
+# gdrive modificado con la API Key nuestra
+# https://github.com/prasmussen/gdrive/issues/426
+##########
+
+# Configuración
+DIR_LOCAL='/datos/backup/'
+DIR_GDRIVE='0B875tseg9mppk'
+DAYS='1'
+MYSQL_DB='drupal'
+MYSQL_USER='root'
+MYSQL_PASS='root'
+LOG='/scripts/backup.log'
+LOG_TAR='/scripts/tar.log'
+LOG_GDRIVE='/scripts/gdrive.log'
+LOG_EMAIL='/scripts/email.log'
+DATE=`date '+%d/%m/%Y'`
+DATE_FILE=`date '+%Y%m%d'`
+TIME=`date '+%H:%M:%S'`
+TIME_AGO=$(date --date='200 days ago' +"%Y-%m-%dT00:00:00")
+
+# Borrar ficheros de log
+rm $LOG
+rm $LOG_TAR
+rm $LOG_GDRIVE
+rm $LOG_EMAIL
+
+# Crear variable resultado
+RESULTADO='(OK)'
+
+echo '' >> $LOG
+echo '---------------------------------------------------------------------------' >> $LOG
+echo '  Registro de actividad de las COPIAS EN DISCO' >> $LOG
+echo '  Fecha: '`date '+%d/%m/%Y'` >> $LOG
+echo '  Hora: '`date '+%H:%M:%S'` >> $LOG
+echo '---------------------------------------------------------------------------' >> $LOG
+echo '' >> $LOG
+
+# Eliminar copias antiguas
+echo 'Elimando copias antiguas...' >> $LOG
+echo '' >> $LOG
+rm -f `find ${DIR_LOCAL} -mtime +${DAYS}` >> $LOG
+
+# Eliminar copias antiguas en Google Drive
+echo 'Elimando copias antiguas en Google Drive...' >> $LOG
+for FILE in $(gdrive list --query "'${DIR_GDRIVE}' in parents and trashed = false and modifiedTime < '${TIME_AGO}'" -m 10000 | cut -f1 -d" " | tail -n +2); do
+   gdrive delete $FILE >> $LOG 2>> $LOG
+   sleep 2
+done;
+echo '' >> $LOG
+
+# Copiar datos
+echo '' >> $LOG
+echo 'Copiando datos...' >> $LOG
+echo '' >> $LOG
+
+# Copiar datos www
+tar czf ${DIR_LOCAL}${DATE_FILE}-moodle-www.tar.gz \
+   --exclude=datos/sessions \
+   --exclude=datos/localcache \
+   /www/moodle/* \
+   2>> $LOG_TAR
+
+if [ `echo $?` == '0' ]; then
+   echo OK ${DIR_LOCAL}${DATE_FILE}-moodle-www.tar.gz '/www/moodle1819/*' >> $LOG
+else
+   echo ERROR ${DIR_LOCAL}${DATE_FILE}-moodle-www.tar.gz '/www/moodle1819/*' >> $LOG
+   RESULTADO='(ERROR)'
+fi
+
+
+# Subir datos a Google Drive
+echo '' >> $LOG
+echo 'Subiendo a Google Drive...' >> $LOG
+echo '' >> $LOG
+
+# Subir datos www a Google Drive
+gdrive upload -p ${DIR_GDRIVE} ${DIR_LOCAL}${DATE_FILE}-moodle-www.tar.gz &>> $LOG_GDRIVE
+if [ `echo $?` == '0' ]; then
+   echo OK Subir ${DIR_LOCAL}${DATE_FILE}-moodle-www.tar.gz >> $LOG
+else
+   echo ERROR Subir ${DIR_LOCAL}${DATE_FILE}-moodle-www.tar.gz >> $LOG
+   RESULTADO='(ERROR)'
+fi
+
+
+
+echo '' >> $LOG
+echo '---------------------------------------------------------------------------' >> $LOG
+echo '  Registro de actividad de las COPIAS DE MYSQL' >> $LOG
+echo '  Fecha: '`date '+%d/%m/%Y'` >> $LOG
+echo '  Hora: '`date '+%H:%M:%S'` >> $LOG
+echo '---------------------------------------------------------------------------' >> $LOG
+echo '' >> $LOG
+
+# Copiar Mysql
+/usr/bin/mysqldump -h localslhost --port 3306 --user=${MYSQL_USER} --password=${MYSQL_PASS} --opt --databases ${MYSQL_DB} > ${DIR_LOCAL}${DATE_FILE}-${MYSQL_DB}.sql 2>> $LOG
+
+if [ `echo $?` == '0' ]; then
+   echo 'OK Mysql database: '${MYSQL_DB} >> $LOG
+else
+   echo 'ERROR Mysql database: '${MYSQL_DB} >> $LOG
+   RESULTADO='(ERROR)'
+fi
+
+# Subir MySql a Google Drive
+echo '' >> $LOG
+echo 'Subiendo a Google Drive...' >> $LOG
+echo '' >> $LOG
+gdrive upload -p ${DIR_GDRIVE} ${DIR_LOCAL}${DATE_FILE}-${MYSQL_DB}.sql &>> $LOG_GDRIVE
+if [ `echo $?` == '0' ]; then
+   echo OK Subir ${DIR_LOCAL}${DATE_FILE}-${MYSQL_DB}.sql >> $LOG
+else
+   echo ERROR Subir ${DIR_LOCAL}${DATE_FILE}-${MYSQL_DB}.sql >> $LOG
+   RESULTADO='(ERROR)'
+fi
+
+echo '' >> $LOG
+echo '---------------------------------------------------------------------------' >> $LOG
+echo '  Registro de la FINAL' >> $LOG
+echo '  Fecha: '`date '+%d/%m/%Y'` >> $LOG
+echo '  Hora: '`date '+%H:%M:%S'` >> $LOG
+echo '---------------------------------------------------------------------------' >> $LOG
+echo ' ** Rev1.2 **' >> $LOG
+echo '' >> $LOG
+
+# Enviar email
+# (Necesita el paquete libmime-lite-perl)
+/var/www/scripts/smtp-cli --verbose \
+  --host=localhost \
+  --from=yo@iesfranciscodelosrios.es \
+  --to=yo@iesfranciscodelosrios.es \
+  --subject='Registro backup '${RESULTADO} \
+  --body-plain=${LOG} &> ${LOG_EMAIL}
+backup.sh
+Mostrando backup.sh.
